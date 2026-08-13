@@ -80,3 +80,43 @@ func TestTop10(t *testing.T) {
 		}
 	})
 }
+
+func TestTop10BasicRules(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		expected []string
+	}{
+		{
+			name:     "only whitespace",
+			text:     " \t\n\r\v\f\u00a0",
+			expected: []string{},
+		},
+		{
+			name:     "frequency has priority over lexicographical order",
+			text:     "beta alpha beta gamma alpha delta alpha",
+			expected: []string{"alpha", "beta", "delta", "gamma"},
+		},
+		{
+			name:     "different whitespace characters separate words",
+			text:     "one\ttwo\none\rthree\u00a0two\vfour",
+			expected: []string{"one", "two", "four", "three"},
+		},
+		{
+			name:     "result is limited to ten lexicographically first words",
+			text:     "k j i h g f e d c b a",
+			expected: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"},
+		},
+		{
+			name:     "case punctuation and hyphen are significant",
+			text:     "Нога нога нога! нога - -",
+			expected: []string{"-", "нога", "Нога", "нога!"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.expected, Top10(tt.text))
+		})
+	}
+}
