@@ -13,3 +13,29 @@
 - `hw16_calendar` (от `hw15_calendar`) -> Merge Request в `hw15_calendar` (если уже вмержена, то в `master`)
 
 **Домашнее задание не принимается, если не принято ДЗ, предшедствующее ему.**
+
+## ДЗ №12
+
+Сервис собирается и проверяется командами:
+
+```bash
+make build
+make test
+make lint
+./bin/calendar --config=./configs/config.toml
+```
+
+После запуска hello-world доступен по адресу `GET /hello`. По умолчанию используется
+in-memory хранилище. Для PostgreSQL укажите `type = "sql"` и DSN в конфиге, затем
+примените миграцию:
+
+```bash
+export DATABASE_DSN='postgres://calendar:calendar@localhost:5432/calendar?sslmode=disable'
+make migrate-up
+```
+
+SQL integration test запускается отдельно против подготовленной базы:
+
+```bash
+CALENDAR_TEST_POSTGRES_DSN="$DATABASE_DSN" go test -race ./internal/storage/sql
+```

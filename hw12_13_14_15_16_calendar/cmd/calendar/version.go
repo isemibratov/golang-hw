@@ -22,6 +22,6 @@ func printVersion() {
 		BuildDate: buildDate,
 		GitHash:   gitHash,
 	}); err != nil {
-		fmt.Printf("error while decode version info: %v\n", err)
+		fmt.Printf("error while encode version info: %v\n", err)
 	}
 }
