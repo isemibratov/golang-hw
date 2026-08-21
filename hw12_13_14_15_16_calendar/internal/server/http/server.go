@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"time"
+
+	"github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/storage"
 )
 
 const (
@@ -25,20 +27,22 @@ type Logger interface {
 	Info(string)
 }
 
-// Application is reserved for calendar use cases exposed by later homeworks.
-type Application interface{}
+// Application contains calendar use cases exposed over HTTP.
+type Application interface {
+	CreateEvent(ctx context.Context, event storage.Event) error
+	UpdateEvent(ctx context.Context, event storage.Event) error
+	DeleteEvent(ctx context.Context, id string) error
+	ListEventsForDay(ctx context.Context, userID string, date time.Time) ([]storage.Event, error)
+	ListEventsForWeek(ctx context.Context, userID string, date time.Time) ([]storage.Event, error)
+	ListEventsForMonth(ctx context.Context, userID string, date time.Time) ([]storage.Event, error)
+}
 
 // NewServer creates an HTTP server bound to address.
 func NewServer(logger Logger, app Application, address string) *Server {
-	_ = app
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/hello", helloHandler)
-
 	return &Server{
 		httpServer: &http.Server{
 			Addr:              address,
-			Handler:           loggingMiddleware(logger, mux),
+			Handler:           loggingMiddleware(logger, newHTTPHandler(app)),
 			ReadHeaderTimeout: readHeaderTimeout,
 			ReadTimeout:       readTimeout,
 			WriteTimeout:      writeTimeout,
