@@ -130,7 +130,8 @@ func (s *Storage) UpdateEvent(ctx context.Context, event storage.Event) error {
 			end_at = $4,
 			description = $5,
 			user_id = $6,
-			notify_before_ns = $7
+			notify_before_ns = $7,
+			notification_sent_at = NULL
 		WHERE id = $1`
 
 	result, err := db.ExecContext(
@@ -215,29 +216,7 @@ func (s *Storage) ListEvents(
 	}
 	defer rows.Close()
 
-	events := make([]storage.Event, 0)
-	for rows.Next() {
-		var event storage.Event
-		var notifyBefore int64
-		if err = rows.Scan(
-			&event.ID,
-			&event.Title,
-			&event.StartAt,
-			&event.EndAt,
-			&event.Description,
-			&event.UserID,
-			&notifyBefore,
-		); err != nil {
-			return nil, fmt.Errorf("list events: scan row: %w", err)
-		}
-		event.NotifyBefore = time.Duration(notifyBefore)
-		events = append(events, event)
-	}
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("list events: read rows: %w", err)
-	}
-
-	return events, nil
+	return scanEvents(rows, "list events")
 }
 
 func (s *Storage) database() (*sql.DB, error) {
