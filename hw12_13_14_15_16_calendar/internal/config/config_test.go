@@ -70,6 +70,87 @@ dsn = "postgres://calendar@localhost/calendar"
 	}
 }
 
+func TestLoadCalendarAppliesEnvironment(t *testing.T) {
+	t.Setenv(envLoggerLevel, "debug")
+	t.Setenv(envHTTPHost, "127.0.0.1")
+	t.Setenv(envHTTPPort, "8888")
+	t.Setenv(envStorageType, StorageTypeSQL)
+	t.Setenv(envStorageDSN, "postgres://calendar@postgres/calendar")
+
+	config, err := LoadCalendar(writeConfig(t, ""))
+	if err != nil {
+		t.Fatalf("LoadCalendar() error = %v", err)
+	}
+	if config.Logger.Level != "debug" {
+		t.Fatalf("logger level = %q, want debug", config.Logger.Level)
+	}
+	if config.HTTP.Host != "127.0.0.1" || config.HTTP.Port != 8888 {
+		t.Fatalf("unexpected HTTP configuration: %#v", config.HTTP)
+	}
+	if config.Storage.Type != StorageTypeSQL ||
+		config.Storage.DSN != "postgres://calendar@postgres/calendar" {
+		t.Fatalf("unexpected storage configuration: %#v", config.Storage)
+	}
+}
+
+func TestLoadSchedulerAppliesEnvironment(t *testing.T) {
+	t.Setenv(envStorageDSN, "postgres://calendar@postgres/calendar")
+	t.Setenv(envKafkaBrokers, "kafka-a:29092, kafka-b:29092")
+	t.Setenv(envKafkaTopic, "calendar.integration")
+	t.Setenv(envKafkaConnectTimeout, "7s")
+	t.Setenv(envKafkaRetryInitial, "250ms")
+	t.Setenv(envKafkaRetryMax, "3s")
+	t.Setenv(envKafkaWriteTimeout, "8s")
+	t.Setenv(envKafkaMaxMessageBytes, "4096")
+	t.Setenv(envSchedulerInterval, "500ms")
+	t.Setenv(envSchedulerBatchSize, "12")
+	t.Setenv(envSchedulerRetentionYears, "2")
+
+	config, err := LoadScheduler(writeConfig(t, ""))
+	if err != nil {
+		t.Fatalf("LoadScheduler() error = %v", err)
+	}
+	if len(config.Kafka.Brokers) != 2 || config.Kafka.Brokers[1] != "kafka-b:29092" {
+		t.Fatalf("unexpected Kafka brokers: %#v", config.Kafka.Brokers)
+	}
+	if config.Kafka.Topic != "calendar.integration" || config.Kafka.MaxMessageBytes != 4096 {
+		t.Fatalf("unexpected Kafka configuration: %#v", config.Kafka)
+	}
+	if config.Kafka.ConnectTimeout.Value() != 7*time.Second ||
+		config.Kafka.RetryInitial.Value() != 250*time.Millisecond ||
+		config.Kafka.RetryMax.Value() != 3*time.Second ||
+		config.Kafka.WriteTimeout.Value() != 8*time.Second {
+		t.Fatalf("unexpected Kafka durations: %#v", config.Kafka)
+	}
+	if config.Scheduler.Interval.Value() != 500*time.Millisecond ||
+		config.Scheduler.BatchSize != 12 || config.Scheduler.RetentionYears != 2 {
+		t.Fatalf("unexpected scheduler configuration: %#v", config.Scheduler)
+	}
+}
+
+func TestLoadStorerAppliesConsumerGroupEnvironment(t *testing.T) {
+	t.Setenv(envStorageDSN, "postgres://calendar@postgres/calendar")
+	t.Setenv(envKafkaGroupID, "calendar-integration-storer")
+
+	config, err := LoadStorer(writeConfig(t, ""))
+	if err != nil {
+		t.Fatalf("LoadStorer() error = %v", err)
+	}
+	if config.Kafka.GroupID != "calendar-integration-storer" {
+		t.Fatalf("Kafka group ID = %q, want calendar-integration-storer", config.Kafka.GroupID)
+	}
+}
+
+func TestLoadRejectsInvalidEnvironmentValue(t *testing.T) {
+	t.Setenv(envStorageDSN, "postgres://calendar@postgres/calendar")
+	t.Setenv(envSchedulerInterval, "immediately")
+
+	_, err := LoadScheduler(writeConfig(t, ""))
+	if err == nil || !strings.Contains(err.Error(), envSchedulerInterval) {
+		t.Fatalf("LoadScheduler() error = %v, want error mentioning %s", err, envSchedulerInterval)
+	}
+}
+
 func TestLoadRejectsUnknownFieldAndInvalidDuration(t *testing.T) {
 	t.Run("unknown field", func(t *testing.T) {
 		path := writeConfig(t, "[storage]\ndsn = \"postgres://localhost/calendar\"\nunknown = true\n")

@@ -156,3 +156,47 @@ make build
 make test
 make lint
 ```
+
+## ДЗ №15
+
+API, планировщик и хранитель собираются в отдельные минимальные Docker-образы.
+Compose-окружение также запускает PostgreSQL, ZooKeeper, Kafka и одноразовый контейнер
+с SQL-миграциями. После запуска HTTP API доступен на `http://localhost:8888`:
+
+```bash
+make up
+curl http://localhost:8888/hello
+make down
+```
+
+Настройки из TOML можно переопределять переменными окружения с префиксом
+`CALENDAR_`. В compose используются, в частности, `CALENDAR_STORAGE_DSN`,
+`CALENDAR_KAFKA_BROKERS`, `CALENDAR_HTTP_HOST` и `CALENDAR_HTTP_PORT`. Порт API на
+хосте можно изменить отдельно, например `CALENDAR_HOST_PORT=9999 make up`.
+
+Интеграционные тесты находятся в отдельном пакете `integration_tests` и защищены
+build tag `integration`, поэтому обычный `make test` их не запускает. Команда ниже
+собирает тестовый образ, поднимает изолированное compose-окружение, проверяет API и
+цепочку доставки уведомлений, а затем удаляет контейнеры, сеть и тестовый том:
+
+```bash
+make integration-tests
+```
+
+Проверяемые сценарии:
+
+- создание события, конфликт идентификатора, пересечение времени и невалидный период;
+- получение событий на день, неделю и месяц;
+- передача уведомления планировщиком через Kafka и сохранение хранителем в PostgreSQL.
+
+Полная проверка ДЗ15:
+
+```bash
+go mod tidy
+make generate-check
+make build
+make test
+make lint
+docker compose --file deployments/docker-compose.yaml config --quiet
+make integration-tests
+```

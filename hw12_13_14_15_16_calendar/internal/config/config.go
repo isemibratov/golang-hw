@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +21,26 @@ const (
 	loggerLevelWarn  = "warn"
 	loggerLevelInfo  = "info"
 	loggerLevelDebug = "debug"
+
+	envLoggerLevel             = "CALENDAR_LOGGER_LEVEL"
+	envHTTPHost                = "CALENDAR_HTTP_HOST"
+	envHTTPPort                = "CALENDAR_HTTP_PORT"
+	envStorageType             = "CALENDAR_STORAGE_TYPE"
+	envStorageDSN              = "CALENDAR_STORAGE_DSN"
+	envKafkaBrokers            = "CALENDAR_KAFKA_BROKERS"
+	envKafkaTopic              = "CALENDAR_KAFKA_TOPIC"
+	envKafkaGroupID            = "CALENDAR_KAFKA_GROUP_ID"
+	envKafkaConnectTimeout     = "CALENDAR_KAFKA_CONNECT_TIMEOUT"
+	envKafkaRetryInitial       = "CALENDAR_KAFKA_RETRY_INITIAL"
+	envKafkaRetryMax           = "CALENDAR_KAFKA_RETRY_MAX"
+	envKafkaWriteTimeout       = "CALENDAR_KAFKA_WRITE_TIMEOUT"
+	envKafkaMaxMessageBytes    = "CALENDAR_KAFKA_MAX_MESSAGE_BYTES"
+	envSchedulerInterval       = "CALENDAR_SCHEDULER_INTERVAL"
+	envSchedulerBatchSize      = "CALENDAR_SCHEDULER_BATCH_SIZE"
+	envSchedulerRetentionYears = "CALENDAR_SCHEDULER_RETENTION_YEARS"
 )
+
+type environmentLookup func(string) (string, bool)
 
 // Duration is a TOML string containing a value accepted by time.ParseDuration.
 type Duration time.Duration
@@ -160,6 +180,9 @@ func LoadCalendar(path string) (Calendar, error) {
 	if err := decode(path, &config); err != nil {
 		return Calendar{}, err
 	}
+	if err := applyCalendarEnvironment(&config, os.LookupEnv); err != nil {
+		return Calendar{}, environmentError(path, err)
+	}
 	if err := config.Validate(); err != nil {
 		return Calendar{}, validationError(path, err)
 	}
@@ -172,6 +195,9 @@ func LoadScheduler(path string) (Scheduler, error) {
 	if err := decode(path, &config); err != nil {
 		return Scheduler{}, err
 	}
+	if err := applySchedulerEnvironment(&config, os.LookupEnv); err != nil {
+		return Scheduler{}, environmentError(path, err)
+	}
 	if err := config.Validate(); err != nil {
 		return Scheduler{}, validationError(path, err)
 	}
@@ -183,6 +209,9 @@ func LoadStorer(path string) (Storer, error) {
 	config := NewStorer()
 	if err := decode(path, &config); err != nil {
 		return Storer{}, err
+	}
+	if err := applyStorerEnvironment(&config, os.LookupEnv); err != nil {
+		return Storer{}, environmentError(path, err)
 	}
 	if err := config.Validate(); err != nil {
 		return Storer{}, validationError(path, err)
@@ -207,6 +236,104 @@ func decode(path string, target interface{}) error {
 
 func validationError(path string, err error) error {
 	return fmt.Errorf("validate config %q: %w", path, err)
+}
+
+func environmentError(path string, err error) error {
+	return fmt.Errorf("load config %q from environment: %w", path, err)
+}
+
+func applyCalendarEnvironment(config *Calendar, lookup environmentLookup) error {
+	applyCommonEnvironment(&config.Logger, &config.Storage, lookup)
+	overrideString(lookup, envHTTPHost, &config.HTTP.Host)
+	return overrideInt(lookup, envHTTPPort, &config.HTTP.Port)
+}
+
+func applySchedulerEnvironment(config *Scheduler, lookup environmentLookup) error {
+	applyCommonEnvironment(&config.Logger, &config.Storage, lookup)
+	if err := applyKafkaEnvironment(&config.Kafka, lookup); err != nil {
+		return err
+	}
+	if err := overrideDuration(lookup, envSchedulerInterval, &config.Scheduler.Interval); err != nil {
+		return err
+	}
+	if err := overrideInt(lookup, envSchedulerBatchSize, &config.Scheduler.BatchSize); err != nil {
+		return err
+	}
+	return overrideInt(lookup, envSchedulerRetentionYears, &config.Scheduler.RetentionYears)
+}
+
+func applyStorerEnvironment(config *Storer, lookup environmentLookup) error {
+	applyCommonEnvironment(&config.Logger, &config.Storage, lookup)
+	return applyKafkaEnvironment(&config.Kafka, lookup)
+}
+
+func applyCommonEnvironment(logger *Logger, storage *Storage, lookup environmentLookup) {
+	overrideString(lookup, envLoggerLevel, &logger.Level)
+	overrideString(lookup, envStorageType, &storage.Type)
+	overrideString(lookup, envStorageDSN, &storage.DSN)
+}
+
+func applyKafkaEnvironment(config *Kafka, lookup environmentLookup) error {
+	if value, ok := lookup(envKafkaBrokers); ok {
+		brokers := strings.Split(value, ",")
+		for index := range brokers {
+			brokers[index] = strings.TrimSpace(brokers[index])
+		}
+		config.Brokers = brokers
+	}
+	overrideString(lookup, envKafkaTopic, &config.Topic)
+	overrideString(lookup, envKafkaGroupID, &config.GroupID)
+
+	durations := []struct {
+		name   string
+		target *Duration
+	}{
+		{name: envKafkaConnectTimeout, target: &config.ConnectTimeout},
+		{name: envKafkaRetryInitial, target: &config.RetryInitial},
+		{name: envKafkaRetryMax, target: &config.RetryMax},
+		{name: envKafkaWriteTimeout, target: &config.WriteTimeout},
+	}
+	for _, duration := range durations {
+		if err := overrideDuration(lookup, duration.name, duration.target); err != nil {
+			return err
+		}
+	}
+
+	return overrideInt(lookup, envKafkaMaxMessageBytes, &config.MaxMessageBytes)
+}
+
+func overrideString(lookup environmentLookup, name string, target *string) {
+	if value, ok := lookup(name); ok {
+		*target = value
+	}
+}
+
+func overrideInt(lookup environmentLookup, name string, target *int) error {
+	value, ok := lookup(name)
+	if !ok {
+		return nil
+	}
+
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", name, err)
+	}
+	*target = parsed
+	return nil
+}
+
+func overrideDuration(lookup environmentLookup, name string, target *Duration) error {
+	value, ok := lookup(name)
+	if !ok {
+		return nil
+	}
+
+	parsed, err := time.ParseDuration(strings.TrimSpace(value))
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", name, err)
+	}
+	*target = NewDuration(parsed)
+	return nil
 }
 
 // Validate checks API configuration values.
