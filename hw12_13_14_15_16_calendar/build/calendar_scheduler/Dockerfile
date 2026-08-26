@@ -23,5 +23,7 @@ COPY configs/scheduler.toml /etc/calendar/scheduler.toml
 
 USER calendar
 
+EXPOSE 8081
+
 ENTRYPOINT ["/usr/local/bin/calendar_scheduler"]
 CMD ["--config=/etc/calendar/scheduler.toml"]

@@ -13,6 +13,10 @@ func TestLoadScheduler(t *testing.T) {
 [logger]
 level = "debug"
 
+[metrics]
+host = "127.0.0.1"
+port = 9101
+
 [storage]
 type = "sql"
 dsn = "postgres://calendar@localhost/calendar"
@@ -38,6 +42,9 @@ retention_years = 1
 	}
 	if config.Logger.Level != "debug" || config.Storage.DSN != "postgres://calendar@localhost/calendar" {
 		t.Fatalf("unexpected shared configuration: %#v", config)
+	}
+	if config.Metrics.Address() != "127.0.0.1:9101" {
+		t.Fatalf("metrics address = %q, want 127.0.0.1:9101", config.Metrics.Address())
 	}
 	if len(config.Kafka.Brokers) != 2 || config.Kafka.Topic != "calendar.test" {
 		t.Fatalf("unexpected Kafka configuration: %#v", config.Kafka)
@@ -68,6 +75,21 @@ dsn = "postgres://calendar@localhost/calendar"
 	if config.Kafka.Topic != "calendar.notifications" || len(config.Kafka.Brokers) != 1 {
 		t.Fatalf("unexpected default Kafka configuration: %#v", config.Kafka)
 	}
+	if config.Metrics.Address() != "0.0.0.0:8082" {
+		t.Fatalf("metrics address = %q, want 0.0.0.0:8082", config.Metrics.Address())
+	}
+}
+
+func TestMetricsDefaultsAndAddress(t *testing.T) {
+	if address := NewScheduler().Metrics.Address(); address != "0.0.0.0:8081" {
+		t.Fatalf("scheduler metrics address = %q, want 0.0.0.0:8081", address)
+	}
+	if address := NewStorer().Metrics.Address(); address != "0.0.0.0:8082" {
+		t.Fatalf("storer metrics address = %q, want 0.0.0.0:8082", address)
+	}
+	if address := (Metrics{Host: "::1", Port: 9090}).Address(); address != "[::1]:9090" {
+		t.Fatalf("IPv6 metrics address = %q, want [::1]:9090", address)
+	}
 }
 
 func TestLoadCalendarAppliesEnvironment(t *testing.T) {
@@ -95,6 +117,8 @@ func TestLoadCalendarAppliesEnvironment(t *testing.T) {
 
 func TestLoadSchedulerAppliesEnvironment(t *testing.T) {
 	t.Setenv(envStorageDSN, "postgres://calendar@postgres/calendar")
+	t.Setenv(envMetricsHost, "127.0.0.2")
+	t.Setenv(envMetricsPort, "9201")
 	t.Setenv(envKafkaBrokers, "kafka-a:29092, kafka-b:29092")
 	t.Setenv(envKafkaTopic, "calendar.integration")
 	t.Setenv(envKafkaConnectTimeout, "7s")
@@ -112,6 +136,9 @@ func TestLoadSchedulerAppliesEnvironment(t *testing.T) {
 	}
 	if len(config.Kafka.Brokers) != 2 || config.Kafka.Brokers[1] != "kafka-b:29092" {
 		t.Fatalf("unexpected Kafka brokers: %#v", config.Kafka.Brokers)
+	}
+	if config.Metrics.Address() != "127.0.0.2:9201" {
+		t.Fatalf("metrics address = %q, want 127.0.0.2:9201", config.Metrics.Address())
 	}
 	if config.Kafka.Topic != "calendar.integration" || config.Kafka.MaxMessageBytes != 4096 {
 		t.Fatalf("unexpected Kafka configuration: %#v", config.Kafka)
@@ -131,6 +158,8 @@ func TestLoadSchedulerAppliesEnvironment(t *testing.T) {
 func TestLoadStorerAppliesConsumerGroupEnvironment(t *testing.T) {
 	t.Setenv(envStorageDSN, "postgres://calendar@postgres/calendar")
 	t.Setenv(envKafkaGroupID, "calendar-integration-storer")
+	t.Setenv(envMetricsHost, "127.0.0.3")
+	t.Setenv(envMetricsPort, "9202")
 
 	config, err := LoadStorer(writeConfig(t, ""))
 	if err != nil {
@@ -138,6 +167,9 @@ func TestLoadStorerAppliesConsumerGroupEnvironment(t *testing.T) {
 	}
 	if config.Kafka.GroupID != "calendar-integration-storer" {
 		t.Fatalf("Kafka group ID = %q, want calendar-integration-storer", config.Kafka.GroupID)
+	}
+	if config.Metrics.Address() != "127.0.0.3:9202" {
+		t.Fatalf("metrics address = %q, want 127.0.0.3:9202", config.Metrics.Address())
 	}
 }
 
@@ -190,6 +222,9 @@ func TestSchedulerConfigValidation(t *testing.T) {
 		{name: "zero interval", change: func(c *Scheduler) { c.Scheduler.Interval = 0 }},
 		{name: "zero batch", change: func(c *Scheduler) { c.Scheduler.BatchSize = 0 }},
 		{name: "zero retention", change: func(c *Scheduler) { c.Scheduler.RetentionYears = 0 }},
+		{name: "empty metrics host", change: func(c *Scheduler) { c.Metrics.Host = " " }},
+		{name: "zero metrics port", change: func(c *Scheduler) { c.Metrics.Port = 0 }},
+		{name: "metrics port above range", change: func(c *Scheduler) { c.Metrics.Port = 65536 }},
 	}
 
 	for _, test := range tests {
@@ -203,13 +238,28 @@ func TestSchedulerConfigValidation(t *testing.T) {
 	}
 }
 
-func TestStorerConfigRequiresConsumerGroup(t *testing.T) {
-	config := NewStorer()
-	config.Storage.DSN = "postgres://localhost/calendar"
-	config.Kafka.GroupID = " "
+func TestStorerConfigValidation(t *testing.T) {
+	valid := NewStorer()
+	valid.Storage.DSN = "postgres://localhost/calendar"
 
-	if err := config.Validate(); err == nil {
-		t.Fatal("Validate() error = nil, want an error")
+	tests := []struct {
+		name   string
+		change func(*Storer)
+	}{
+		{name: "empty consumer group", change: func(c *Storer) { c.Kafka.GroupID = " " }},
+		{name: "empty metrics host", change: func(c *Storer) { c.Metrics.Host = " " }},
+		{name: "zero metrics port", change: func(c *Storer) { c.Metrics.Port = 0 }},
+		{name: "metrics port above range", change: func(c *Storer) { c.Metrics.Port = 65536 }},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := valid
+			test.change(&config)
+			if err := config.Validate(); err == nil {
+				t.Fatal("Validate() error = nil, want an error")
+			}
+		})
 	}
 }
 

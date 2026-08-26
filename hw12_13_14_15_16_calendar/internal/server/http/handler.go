@@ -31,8 +31,12 @@ type apiHandler struct {
 
 var _ openapi.ServerInterface = (*apiHandler)(nil)
 
-func newHTTPHandler(app Application) http.Handler {
+func newHTTPHandler(app Application, metrics ...Metrics) http.Handler {
 	router := chi.NewRouter()
+	if observer := firstMetrics(metrics); observer != nil {
+		router.Use(metricsMiddleware(observer))
+		router.Handle("/metrics", observer.Handler())
+	}
 	router.Get("/hello", helloHandler)
 
 	return openapi.HandlerWithOptions(&apiHandler{app: app}, openapi.ChiServerOptions{
@@ -41,6 +45,13 @@ func newHTTPHandler(app Application) http.Handler {
 			writeError(w, http.StatusBadRequest, "invalid_request", "request parameters are invalid")
 		},
 	})
+}
+
+func firstMetrics(values []Metrics) Metrics {
+	if len(values) == 0 {
+		return nil
+	}
+	return values[0]
 }
 
 // CreateEvent handles POST /api/v1/events.

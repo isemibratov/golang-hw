@@ -99,6 +99,12 @@ services:
         condition: service_completed_successfully
       kafka:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/metrics"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
 
   storer:
     image: calendar-storer:develop
@@ -117,6 +123,27 @@ services:
         condition: service_completed_successfully
       kafka:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8082/metrics"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    ports:
+      - "${CALENDAR_PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    healthcheck:
+      test: ["CMD", "/bin/promtool", "check", "ready", "--url=http://127.0.0.1:9090"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
 
 volumes:
   postgres-data:

@@ -38,11 +38,11 @@ type Application interface {
 }
 
 // NewServer creates an HTTP server bound to address.
-func NewServer(logger Logger, app Application, address string) *Server {
+func NewServer(logger Logger, app Application, address string, metrics ...Metrics) *Server {
 	return &Server{
 		httpServer: &http.Server{
 			Addr:              address,
-			Handler:           loggingMiddleware(logger, newHTTPHandler(app)),
+			Handler:           loggingMiddleware(logger, newHTTPHandler(app, metrics...)),
 			ReadHeaderTimeout: readHeaderTimeout,
 			ReadTimeout:       readTimeout,
 			WriteTimeout:      writeTimeout,

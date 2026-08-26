@@ -49,6 +49,29 @@ func (l *loggerStub) Error(message string) {
 	l.messages = append(l.messages, message)
 }
 
+type storageObservation struct {
+	success    bool
+	finishedAt time.Time
+}
+
+type metricsStub struct {
+	running []bool
+	stored  []storageObservation
+	invalid int
+}
+
+func (m *metricsStub) SetStorerRunning(running bool) {
+	m.running = append(m.running, running)
+}
+
+func (m *metricsStub) ObserveNotificationStored(success bool, finishedAt time.Time) {
+	m.stored = append(m.stored, storageObservation{success: success, finishedAt: finishedAt})
+}
+
+func (m *metricsStub) ObserveInvalidNotification() {
+	m.invalid++
+}
+
 func TestStorerSavesValidNotification(t *testing.T) {
 	want := notification.Notification{
 		EventID: "event-1",
@@ -63,7 +86,8 @@ func TestStorerSavesValidNotification(t *testing.T) {
 		"userId":"user-1"
 	}`)
 	storageClient := &storageStub{}
-	service := newStorer(t, &consumerStub{payload: payload}, storageClient, &loggerStub{})
+	metrics := &metricsStub{}
+	service := newStorer(t, &consumerStub{payload: payload}, storageClient, &loggerStub{}, metrics)
 
 	if err := service.Run(context.Background()); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -73,6 +97,12 @@ func TestStorerSavesValidNotification(t *testing.T) {
 	}
 	if !reflect.DeepEqual(storageClient.values[0], want) {
 		t.Fatalf("saved notification = %+v, want %+v", storageClient.values[0], want)
+	}
+	if !reflect.DeepEqual(metrics.running, []bool{true, false}) {
+		t.Fatalf("storer running observations = %v, want [true false]", metrics.running)
+	}
+	if len(metrics.stored) != 1 || !metrics.stored[0].success || metrics.stored[0].finishedAt.IsZero() {
+		t.Fatalf("storage metric observations = %#v, want one successful timestamped observation", metrics.stored)
 	}
 }
 
@@ -100,7 +130,8 @@ func TestStorerSkipsAndLogsInvalidPayload(t *testing.T) {
 			consumer := &consumerStub{payload: []byte(test.payload)}
 			storageClient := &storageStub{}
 			logg := &loggerStub{}
-			service := newStorer(t, consumer, storageClient, logg)
+			metrics := &metricsStub{}
+			service := newStorer(t, consumer, storageClient, logg, metrics)
 
 			if err := service.Run(context.Background()); err != nil {
 				t.Fatalf("Run() error = %v, want nil so the payload is committed", err)
@@ -117,6 +148,10 @@ func TestStorerSkipsAndLogsInvalidPayload(t *testing.T) {
 			if len(logg.messages) != 1 || !strings.Contains(logg.messages[0], "skipping invalid notification") {
 				t.Fatalf("log messages = %#v, want one skip message", logg.messages)
 			}
+			if metrics.invalid != 1 || len(metrics.stored) != 0 {
+				t.Fatalf("metrics = invalid:%d stored:%#v, want one invalid observation",
+					metrics.invalid, metrics.stored)
+			}
 		})
 	}
 }
@@ -128,7 +163,8 @@ func TestStorerReturnsStorageFailureWithoutCommitting(t *testing.T) {
 	)
 	storageClient := &storageStub{results: []error{wantErr}}
 	consumer := &consumerStub{payload: payload}
-	service := newStorer(t, consumer, storageClient, &loggerStub{})
+	metrics := &metricsStub{}
+	service := newStorer(t, consumer, storageClient, &loggerStub{}, metrics)
 
 	err := service.Run(context.Background())
 	if !errors.Is(err, wantErr) {
@@ -139,6 +175,23 @@ func TestStorerReturnsStorageFailureWithoutCommitting(t *testing.T) {
 	}
 	if consumer.committed {
 		t.Fatal("message was committed after notification storage failure")
+	}
+	if len(metrics.stored) != 1 || metrics.stored[0].success || metrics.stored[0].finishedAt.IsZero() {
+		t.Fatalf("storage metric observations = %#v, want one failed timestamped observation", metrics.stored)
+	}
+}
+
+func TestStorerDoesNotReportCancelledStorageAsFailure(t *testing.T) {
+	metrics := &metricsStub{}
+	storageClient := &storageStub{results: []error{context.Canceled}}
+	service := newStorer(t, &consumerStub{}, storageClient, &loggerStub{}, metrics)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	payload := []byte(`{"eventId":"e","title":"x","eventAt":"2026-08-25T09:30:00Z","userId":"u"}`)
+	err := service.handle(ctx, payload)
+	if !errors.Is(err, context.Canceled) || len(metrics.stored) != 0 {
+		t.Fatalf("handle() error = %v, metrics = %#v; want cancellation without observations", err, metrics.stored)
 	}
 }
 
@@ -177,10 +230,10 @@ func TestStorerDelegatesConsumerError(t *testing.T) {
 	}
 }
 
-func newStorer(t *testing.T, consumer Consumer, storage Storage, logger Logger) *Storer {
+func newStorer(t *testing.T, consumer Consumer, storage Storage, logger Logger, metrics ...Metrics) *Storer {
 	t.Helper()
 
-	service, err := New(consumer, storage, logger)
+	service, err := New(consumer, storage, logger, metrics...)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

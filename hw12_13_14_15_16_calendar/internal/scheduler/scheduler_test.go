@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -107,6 +108,30 @@ func (l *loggerStub) Error(message string) {
 	if l.onError != nil {
 		l.onError()
 	}
+}
+
+type cycleObservation struct {
+	success    bool
+	finishedAt time.Time
+	duration   time.Duration
+}
+
+type metricsStub struct {
+	running   []bool
+	cycles    []cycleObservation
+	published []bool
+}
+
+func (m *metricsStub) SetSchedulerRunning(running bool) {
+	m.running = append(m.running, running)
+}
+
+func (m *metricsStub) ObserveSchedulerCycle(success bool, finishedAt time.Time, duration time.Duration) {
+	m.cycles = append(m.cycles, cycleObservation{success: success, finishedAt: finishedAt, duration: duration})
+}
+
+func (m *metricsStub) ObserveNotificationPublished(success bool) {
+	m.published = append(m.published, success)
 }
 
 func TestConfigValidate(t *testing.T) {
@@ -226,6 +251,82 @@ func TestRunOnceDoesNotMarkEventWhenPublishFails(t *testing.T) {
 	}
 }
 
+func TestRunOnceReportsCycleAndPublicationMetrics(t *testing.T) {
+	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
+	event := newEvent("event-1", now.Add(time.Hour))
+
+	t.Run("success", func(t *testing.T) {
+		metrics := &metricsStub{}
+		process := newScheduler(
+			t,
+			&storageStub{batches: [][]storage.Event{{event}}},
+			&producerStub{},
+			&loggerStub{},
+			Config{Interval: time.Minute, BatchSize: 10, RetentionYears: 1},
+			metrics,
+		)
+
+		if err := process.RunOnce(context.Background(), now); err != nil {
+			t.Fatalf("RunOnce() error = %v", err)
+		}
+		assertSchedulerMetrics(t, metrics, true, []bool{true})
+	})
+
+	t.Run("publication failure", func(t *testing.T) {
+		metrics := &metricsStub{}
+		wantErr := errors.New("broker unavailable")
+		process := newScheduler(
+			t,
+			&storageStub{batches: [][]storage.Event{{event}}},
+			&producerStub{failAt: 1, err: wantErr},
+			&loggerStub{},
+			Config{Interval: time.Minute, BatchSize: 10, RetentionYears: 1},
+			metrics,
+		)
+
+		if err := process.RunOnce(context.Background(), now); !errors.Is(err, wantErr) {
+			t.Fatalf("RunOnce() error = %v, want %v", err, wantErr)
+		}
+		assertSchedulerMetrics(t, metrics, false, []bool{false})
+	})
+
+	t.Run("cancelled publication", func(t *testing.T) {
+		metrics := &metricsStub{}
+		process := newScheduler(
+			t,
+			&storageStub{batches: [][]storage.Event{{event}}},
+			&producerStub{failAt: 1, err: context.Canceled},
+			&loggerStub{},
+			Config{Interval: time.Minute, BatchSize: 10, RetentionYears: 1},
+			metrics,
+		)
+
+		if err := process.RunOnce(context.Background(), now); !errors.Is(err, context.Canceled) {
+			t.Fatalf("RunOnce() error = %v, want %v", err, context.Canceled)
+		}
+		if len(metrics.cycles) != 0 || len(metrics.published) != 0 {
+			t.Fatalf("cancelled work was reported as a failure: cycles=%#v published=%v",
+				metrics.cycles, metrics.published)
+		}
+	})
+}
+
+func assertSchedulerMetrics(t *testing.T, metrics *metricsStub, wantCycle bool, wantPublished []bool) {
+	t.Helper()
+
+	if len(metrics.cycles) != 1 {
+		t.Fatalf("cycle observations = %d, want 1", len(metrics.cycles))
+	}
+	cycle := metrics.cycles[0]
+	if cycle.success != wantCycle || cycle.finishedAt.IsZero() || cycle.duration < 0 {
+		t.Fatalf("cycle observation = %#v, want success=%t with timestamp and non-negative duration",
+			cycle, wantCycle)
+	}
+	if !reflect.DeepEqual(metrics.published, wantPublished) {
+		t.Fatalf("publication observations = %v, want %v", metrics.published, wantPublished)
+	}
+}
+
 func TestRunOnceRetriesUpdatedSnapshotAfterConditionalMark(t *testing.T) {
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	oldEvent := newEvent("event-1", now.Add(time.Hour))
@@ -264,11 +365,12 @@ func TestRunLogsCycleErrorAndStopsOnCancellation(t *testing.T) {
 	storageClient := &storageStub{deleteErr: wantErr}
 	ctx, cancel := context.WithCancel(context.Background())
 	log := &loggerStub{onError: cancel}
+	metrics := &metricsStub{}
 	scheduler := newScheduler(t, storageClient, &producerStub{}, log, Config{
 		Interval:       time.Hour,
 		BatchSize:      10,
 		RetentionYears: 1,
-	})
+	}, metrics)
 
 	if err := scheduler.Run(ctx); err != nil {
 		t.Fatalf("Run() returned an unexpected error: %v", err)
@@ -276,23 +378,30 @@ func TestRunLogsCycleErrorAndStopsOnCancellation(t *testing.T) {
 	if len(log.messages) != 1 || !strings.Contains(log.messages[0], wantErr.Error()) {
 		t.Fatalf("log messages = %q, want cycle error containing %q", log.messages, wantErr)
 	}
+	if !reflect.DeepEqual(metrics.running, []bool{true, false}) {
+		t.Fatalf("scheduler running observations = %v, want [true false]", metrics.running)
+	}
 }
 
 func TestRunStopsWhenContextIsAlreadyCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	storageClient := &storageStub{}
+	metrics := &metricsStub{}
 	scheduler := newScheduler(t, storageClient, &producerStub{}, &loggerStub{}, Config{
 		Interval:       time.Hour,
 		BatchSize:      10,
 		RetentionYears: 1,
-	})
+	}, metrics)
 
 	if err := scheduler.Run(ctx); err != nil {
 		t.Fatalf("Run() returned an unexpected error: %v", err)
 	}
 	if !storageClient.cutoff.IsZero() {
 		t.Fatalf("storage was called for an already cancelled context: cutoff = %v", storageClient.cutoff)
+	}
+	if len(metrics.cycles) != 0 {
+		t.Fatalf("cancelled scheduler cycles were reported as completed: %#v", metrics.cycles)
 	}
 }
 
@@ -352,10 +461,11 @@ func newScheduler(
 	producer Producer,
 	logger Logger,
 	config Config,
+	metrics ...Metrics,
 ) *Scheduler {
 	t.Helper()
 
-	value, err := New(storageClient, producer, logger, config)
+	value, err := New(storageClient, producer, logger, config, metrics...)
 	if err != nil {
 		t.Fatalf("New() returned an unexpected error: %v", err)
 	}

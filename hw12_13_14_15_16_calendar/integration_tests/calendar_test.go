@@ -23,12 +23,14 @@ import (
 )
 
 const (
-	defaultHTTPURL     = "http://calendar:8080"
-	defaultDatabaseDSN = "postgres://calendar:calendar@postgres:5432/calendar?sslmode=disable"
-	eventsPath         = "/api/v1/events"
-	calendarDateLayout = "2006-01-02"
-	requestTimeout     = 5 * time.Second
-	pipelineTimeout    = 30 * time.Second
+	defaultHTTPURL             = "http://calendar:8080"
+	defaultSchedulerMetricsURL = "http://scheduler:8081/metrics"
+	defaultStorerMetricsURL    = "http://storer:8082/metrics"
+	defaultDatabaseDSN         = "postgres://calendar:calendar@postgres:5432/calendar?sslmode=disable"
+	eventsPath                 = "/api/v1/events"
+	calendarDateLayout         = "2006-01-02"
+	requestTimeout             = 5 * time.Second
+	pipelineTimeout            = 30 * time.Second
 )
 
 type eventRequest struct {
@@ -57,9 +59,11 @@ type errorResponse struct {
 }
 
 type testEnvironment struct {
-	baseURL string
-	client  *http.Client
-	db      *sql.DB
+	baseURL             string
+	schedulerMetricsURL string
+	storerMetricsURL    string
+	client              *http.Client
+	db                  *sql.DB
 }
 
 type storedNotification struct {
@@ -112,6 +116,56 @@ func TestCalendarAPI(t *testing.T) {
 		want := []string{dayEvent.ID, weekEvent.ID, monthEvent.ID}
 		assertListedEventIDs(t, environment, "month", userID, anchor, want)
 	})
+
+	t.Run("update and delete event", func(t *testing.T) {
+		mutable := newEventRequest(
+			"integration-mutable",
+			"Mutable event",
+			userID,
+			anchor.AddDate(0, 0, 20),
+		)
+		environment.createEvent(t, mutable)
+
+		mutable.Title = "Updated mutable event"
+		status, _, body := environment.sendJSON(
+			t,
+			http.MethodPut,
+			eventsPath+"/"+url.PathEscape(mutable.ID),
+			map[string]interface{}{
+				"title":                 mutable.Title,
+				"start_at":              mutable.StartAt,
+				"end_at":                mutable.EndAt,
+				"description":           mutable.Description,
+				"user_id":               mutable.UserID,
+				"notify_before_seconds": mutable.NotifyBeforeSeconds,
+			},
+		)
+		if status != http.StatusOK {
+			t.Fatalf("update event status = %d, want %d; body: %s", status, http.StatusOK, body)
+		}
+
+		status, _, body = environment.sendJSON(
+			t,
+			http.MethodDelete,
+			eventsPath+"/"+url.PathEscape(mutable.ID),
+			nil,
+		)
+		if status != http.StatusNoContent {
+			t.Fatalf("delete event status = %d, want %d; body: %s", status, http.StatusNoContent, body)
+		}
+	})
+
+	assertMetricsEventually(t, environment.client, environment.baseURL+"/metrics", []string{
+		"calendar_http_requests_total",
+		`status_code="400"`,
+		"calendar_http_request_duration_seconds_bucket",
+		`calendar_event_operations_total{operation="create",result="success"}`,
+		`calendar_event_operations_total{operation="update",result="success"}`,
+		`calendar_event_operations_total{operation="delete",result="success"}`,
+		`calendar_event_operations_total{operation="list_day",result="success"}`,
+		`calendar_event_operations_total{operation="list_week",result="success"}`,
+		`calendar_event_operations_total{operation="list_month",result="success"}`,
+	})
 }
 
 func TestNotificationPipelinePersistsNotification(t *testing.T) {
@@ -137,6 +191,17 @@ func TestNotificationPipelinePersistsNotification(t *testing.T) {
 	if !notification.sentAt.Valid {
 		t.Fatal("event notification_sent_at is NULL after notification was stored")
 	}
+
+	assertMetricsEventually(t, environment.client, environment.schedulerMetricsURL, []string{
+		"calendar_scheduler_running 1",
+		`calendar_scheduler_cycles_total{result="success"}`,
+		`calendar_notifications_published_total{result="success"}`,
+	})
+	assertMetricsEventually(t, environment.client, environment.storerMetricsURL, []string{
+		"calendar_storer_running 1",
+		`calendar_notifications_processed_total{result="stored"}`,
+		"calendar_storer_last_success_timestamp_seconds",
+	})
 }
 
 func newTestEnvironment(t *testing.T) *testEnvironment {
@@ -156,8 +221,13 @@ func newTestEnvironment(t *testing.T) *testEnvironment {
 
 	return &testEnvironment{
 		baseURL: strings.TrimRight(environmentValue("CALENDAR_HTTP_URL", defaultHTTPURL), "/"),
-		client:  &http.Client{Timeout: requestTimeout},
-		db:      database,
+		schedulerMetricsURL: environmentValue(
+			"CALENDAR_SCHEDULER_METRICS_URL",
+			defaultSchedulerMetricsURL,
+		),
+		storerMetricsURL: environmentValue("CALENDAR_STORER_METRICS_URL", defaultStorerMetricsURL),
+		client:           &http.Client{Timeout: requestTimeout},
+		db:               database,
 	}
 }
 
@@ -334,6 +404,61 @@ func decodeResponse(t *testing.T, body []byte, target interface{}) {
 	if err := json.Unmarshal(body, target); err != nil {
 		t.Fatalf("decode response %q: %v", body, err)
 	}
+}
+
+func assertMetricsEventually(t *testing.T, client *http.Client, endpoint string, fragments []string) {
+	t.Helper()
+
+	deadline := time.Now().Add(requestTimeout)
+	var lastBody string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		lastBody, lastErr = fetchMetrics(client, endpoint)
+		if lastErr == nil && containsAll(lastBody, fragments) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("metrics at %s did not contain %q: %v\nlast body:\n%s",
+		endpoint, fragments, lastErr, lastBody)
+}
+
+func fetchMetrics(client *http.Client, endpoint string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	defer cancel()
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", fmt.Errorf("create metrics request: %w", err)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("perform metrics request: %w", err)
+	}
+	body, readErr := io.ReadAll(response.Body)
+	closeErr := response.Body.Close()
+	if readErr != nil {
+		return "", fmt.Errorf("read metrics response: %w", readErr)
+	}
+	if closeErr != nil {
+		return "", fmt.Errorf("close metrics response: %w", closeErr)
+	}
+	if response.StatusCode != http.StatusOK {
+		return string(body), fmt.Errorf("metrics status is %d", response.StatusCode)
+	}
+	if !strings.HasPrefix(response.Header.Get("Content-Type"), "text/plain") {
+		return string(body), fmt.Errorf("unexpected metrics Content-Type %q", response.Header.Get("Content-Type"))
+	}
+	return string(body), nil
+}
+
+func containsAll(value string, fragments []string) bool {
+	for _, fragment := range fragments {
+		if !strings.Contains(value, fragment) {
+			return false
+		}
+	}
+	return true
 }
 
 func waitForNotification(t *testing.T, database *sql.DB, eventID string) storedNotification {

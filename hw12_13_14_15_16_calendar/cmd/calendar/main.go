@@ -11,6 +11,7 @@ import (
 
 	"github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/app"
 	"github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/logger"
+	"github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/monitoring"
 	internalhttp "github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/server/http"
 	memorystorage "github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/storage/memory"
 	sqlstorage "github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/storage/sql"
@@ -65,7 +66,8 @@ func run(args []string) error {
 	}()
 
 	calendar := app.New(logg, eventStorage)
-	server := internalhttp.NewServer(logg, calendar, config.HTTP.Address())
+	metrics := monitoring.NewAPI()
+	server := internalhttp.NewServer(logg, calendar, config.HTTP.Address(), metrics)
 
 	ctx, cancel := signal.NotifyContext(context.Background(),
 		syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
