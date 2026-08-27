@@ -1,0 +1,497 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Calendar API",
+    "description": "REST API for creating, updating, deleting, and listing calendar events.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local calendar service"
+    }
+  ],
+  "tags": [
+    {
+      "name": "events",
+      "description": "Calendar event operations"
+    }
+  ],
+  "paths": {
+    "/api/v1/events": {
+      "post": {
+        "tags": [
+          "events"
+        ],
+        "summary": "Create an event",
+        "operationId": "createEvent",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEventRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Event created",
+            "headers": {
+              "Location": {
+                "description": "URL of the created event",
+                "schema": {
+                  "type": "string",
+                  "example": "/api/v1/events/event-1"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Event"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/v1/events/{eventId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/EventID"
+        }
+      ],
+      "put": {
+        "tags": [
+          "events"
+        ],
+        "summary": "Update an event",
+        "operationId": "updateEvent",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateEventRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Event updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Event"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "events"
+        ],
+        "summary": "Delete an event",
+        "operationId": "deleteEvent",
+        "responses": {
+          "204": {
+            "description": "Event deleted"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/v1/events/day": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "summary": "List events for a day",
+        "operationId": "listEventsForDay",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserID"
+          },
+          {
+            "$ref": "#/components/parameters/Date"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/EventList"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/v1/events/week": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "summary": "List events for seven days",
+        "description": "Returns events for the seven-day period beginning on date.",
+        "operationId": "listEventsForWeek",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserID"
+          },
+          {
+            "$ref": "#/components/parameters/Date"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/EventList"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/v1/events/month": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "summary": "List events for a month",
+        "description": "Returns events for the calendar month containing date.",
+        "operationId": "listEventsForMonth",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserID"
+          },
+          {
+            "$ref": "#/components/parameters/Date"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/EventList"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "EventID": {
+        "name": "eventId",
+        "in": "path",
+        "description": "Unique event identifier",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "example": "event-1"
+        }
+      },
+      "UserID": {
+        "name": "user_id",
+        "in": "query",
+        "description": "Identifier of the event owner",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "example": "user-1"
+        }
+      },
+      "Date": {
+        "name": "date",
+        "in": "query",
+        "description": "Calendar date in YYYY-MM-DD format",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "example": "2026-08-21"
+        }
+      }
+    },
+    "schemas": {
+      "CreateEventRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "start_at",
+          "end_at",
+          "user_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "example": "event-1"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "example": "Team meeting"
+          },
+          "start_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-21T10:00:00Z"
+          },
+          "end_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-21T11:00:00Z"
+          },
+          "description": {
+            "type": "string",
+            "default": "",
+            "example": "Discuss the release plan"
+          },
+          "user_id": {
+            "type": "string",
+            "minLength": 1,
+            "example": "user-1"
+          },
+          "notify_before_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9223372036,
+            "default": 0,
+            "example": 900
+          }
+        }
+      },
+      "UpdateEventRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "start_at",
+          "end_at",
+          "user_id"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "example": "Updated team meeting"
+          },
+          "start_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-21T11:00:00Z"
+          },
+          "end_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-21T12:00:00Z"
+          },
+          "description": {
+            "type": "string",
+            "default": "",
+            "example": "Discuss the updated release plan"
+          },
+          "user_id": {
+            "type": "string",
+            "minLength": 1,
+            "example": "user-1"
+          },
+          "notify_before_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9223372036,
+            "default": 0,
+            "example": 1800
+          }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "start_at",
+          "end_at",
+          "description",
+          "user_id",
+          "notify_before_seconds"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "event-1"
+          },
+          "title": {
+            "type": "string",
+            "example": "Team meeting"
+          },
+          "start_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-21T10:00:00Z"
+          },
+          "end_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-21T11:00:00Z"
+          },
+          "description": {
+            "type": "string",
+            "example": "Discuss the release plan"
+          },
+          "user_id": {
+            "type": "string",
+            "example": "user-1"
+          },
+          "notify_before_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "example": 900
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "invalid_request"
+          },
+          "message": {
+            "type": "string",
+            "example": "request is invalid"
+          }
+        }
+      }
+    },
+    "responses": {
+      "EventList": {
+        "description": "Calendar events ordered by start time and ID",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Event"
+              }
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "Request parameters or body are invalid",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Event not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Event identifier or time interval conflicts with an existing event",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "UnsupportedMediaType": {
+        "description": "Request body is not JSON",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "InternalServerError": {
+        "description": "Unexpected server error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

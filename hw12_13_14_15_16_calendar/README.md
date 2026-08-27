@@ -39,3 +39,51 @@ SQL integration test запускается отдельно против под
 ```bash
 CALENDAR_TEST_POSTGRES_DSN="$DATABASE_DSN" go test -race ./internal/storage/sql
 ```
+
+## ДЗ №13
+
+REST API описан спецификацией OpenAPI 3.0.3 в [`api/swagger.json`](./api/swagger.json).
+Типы запросов, ответов и интерфейс HTTP-сервера генерируются `oapi-codegen v1.12.4`:
+
+```bash
+make generate
+make generate-check
+```
+
+Версия генератора закреплена в Makefile и совместима с Go 1.19, используемым в CI.
+Сгенерированный код находится в `internal/server/http/openapi`; реализация хендлеров
+расположена в родительском транспортном пакете и зависит только от интерфейса приложения.
+
+| Метод | Эндпоинт | Назначение |
+| --- | --- | --- |
+| `POST` | `/api/v1/events` | Создать событие |
+| `PUT` | `/api/v1/events/{eventId}` | Обновить событие |
+| `DELETE` | `/api/v1/events/{eventId}` | Удалить событие |
+| `GET` | `/api/v1/events/day?user_id=...&date=YYYY-MM-DD` | Получить события на день |
+| `GET` | `/api/v1/events/week?user_id=...&date=YYYY-MM-DD` | Получить события на семь дней, начиная с даты |
+| `GET` | `/api/v1/events/month?user_id=...&date=YYYY-MM-DD` | Получить события на календарный месяц |
+
+Пример создания события:
+
+```bash
+curl -i -X POST http://localhost:8080/api/v1/events \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "id": "event-1",
+    "title": "Team meeting",
+    "start_at": "2026-08-21T10:00:00Z",
+    "end_at": "2026-08-21T11:00:00Z",
+    "description": "Discuss the release plan",
+    "user_id": "user-1",
+    "notify_before_seconds": 900
+  }'
+```
+
+Полная проверка реализации:
+
+```bash
+make generate-check
+make build
+make test
+make lint
+```
