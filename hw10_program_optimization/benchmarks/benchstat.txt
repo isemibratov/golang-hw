@@ -1,0 +1,18 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/isemibratov/golang-hw/hw10_program_optimization
+                 │ benchmarks/before.txt │        benchmarks/after.txt         │
+                 │        sec/op         │   sec/op     vs base                │
+GetDomainStat-12            275.27m ± 1%   43.09m ± 2%  -84.35% (p=0.000 n=10)
+
+                 │ benchmarks/before.txt │          benchmarks/after.txt          │
+                 │          B/s          │      B/s       vs base                 │
+GetDomainStat-12            60.20Mi ± 1%   384.55Mi ± 2%  +538.82% (p=0.000 n=10)
+
+                 │ benchmarks/before.txt │         benchmarks/after.txt         │
+                 │         B/op          │     B/op      vs base                │
+GetDomainStat-12           308.73Mi ± 0%   10.80Mi ± 0%  -96.50% (p=0.000 n=10)
+
+                 │ benchmarks/before.txt │        benchmarks/after.txt         │
+                 │       allocs/op       │  allocs/op   vs base                │
+GetDomainStat-12            3144.4k ± 0%   711.1k ± 0%  -77.39% (p=0.000 n=10)

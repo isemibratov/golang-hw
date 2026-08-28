@@ -1,0 +1,28 @@
+=== RUN   TestGetDomainStat_Time_And_Memory
+    stats_optimization_test.go:46: time used: 115.052167ms / 300ms
+    stats_optimization_test.go:47: memory used: 10Mb / 30Mb
+--- PASS: TestGetDomainStat_Time_And_Memory (1.31s)
+PASS
+ok  	github.com/isemibratov/golang-hw/hw10_program_optimization	1.754s
+=== RUN   TestGetDomainStat_Time_And_Memory
+    stats_optimization_test.go:46: time used: 116.562125ms / 300ms
+    stats_optimization_test.go:47: memory used: 10Mb / 30Mb
+--- PASS: TestGetDomainStat_Time_And_Memory (1.32s)
+=== RUN   TestGetDomainStat_Time_And_Memory
+    stats_optimization_test.go:46: time used: 117.115708ms / 300ms
+    stats_optimization_test.go:47: memory used: 11Mb / 30Mb
+--- PASS: TestGetDomainStat_Time_And_Memory (1.18s)
+=== RUN   TestGetDomainStat_Time_And_Memory
+    stats_optimization_test.go:46: time used: 118.334333ms / 300ms
+    stats_optimization_test.go:47: memory used: 10Mb / 30Mb
+--- PASS: TestGetDomainStat_Time_And_Memory (1.18s)
+=== RUN   TestGetDomainStat_Time_And_Memory
+    stats_optimization_test.go:46: time used: 117.520959ms / 300ms
+    stats_optimization_test.go:47: memory used: 10Mb / 30Mb
+--- PASS: TestGetDomainStat_Time_And_Memory (1.18s)
+=== RUN   TestGetDomainStat_Time_And_Memory
+    stats_optimization_test.go:46: time used: 117.894417ms / 300ms
+    stats_optimization_test.go:47: memory used: 11Mb / 30Mb
+--- PASS: TestGetDomainStat_Time_And_Memory (1.18s)
+PASS
+ok  	github.com/isemibratov/golang-hw/hw10_program_optimization	6.370s

@@ -1,0 +1,15 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/isemibratov/golang-hw/hw10_program_optimization
+BenchmarkGetDomainStat-12    	       1	 280998625 ns/op	  61.83 MB/s	323734928 B/op	 3144468 allocs/op
+BenchmarkGetDomainStat-12    	       1	 276837958 ns/op	  62.76 MB/s	323654336 B/op	 3144375 allocs/op
+BenchmarkGetDomainStat-12    	       1	 275868791 ns/op	  62.98 MB/s	323730800 B/op	 3144386 allocs/op
+BenchmarkGetDomainStat-12    	       1	 275375583 ns/op	  63.10 MB/s	323692096 B/op	 3144375 allocs/op
+BenchmarkGetDomainStat-12    	       1	 275683875 ns/op	  63.03 MB/s	323729856 B/op	 3144382 allocs/op
+BenchmarkGetDomainStat-12    	       1	 274513083 ns/op	  63.30 MB/s	323730944 B/op	 3144388 allocs/op
+BenchmarkGetDomainStat-12    	       1	 271709708 ns/op	  63.95 MB/s	323766344 B/op	 3144388 allocs/op
+BenchmarkGetDomainStat-12    	       1	 275166917 ns/op	  63.14 MB/s	323766880 B/op	 3144385 allocs/op
+BenchmarkGetDomainStat-12    	       1	 271973917 ns/op	  63.89 MB/s	323690952 B/op	 3144375 allocs/op
+BenchmarkGetDomainStat-12    	       1	 272916083 ns/op	  63.67 MB/s	323655464 B/op	 3144380 allocs/op
+PASS
+ok  	github.com/isemibratov/golang-hw/hw10_program_optimization	4.386s
