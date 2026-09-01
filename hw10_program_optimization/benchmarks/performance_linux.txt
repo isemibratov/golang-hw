@@ -1,0 +1,29 @@
+# Go 1.19.13, linux/amd64 emulation, GOMAXPROCS=4, 4 CPU quota
+=== RUN   TestGetDomainStat_Time_And_Memory
+    stats_optimization_test.go:46: time used: 241.548334ms / 300ms
+    stats_optimization_test.go:47: memory used: 10Mb / 30Mb
+--- PASS: TestGetDomainStat_Time_And_Memory (3.74s)
+=== RUN   TestGetDomainStat_Time_And_Memory
+    stats_optimization_test.go:46: time used: 241.130374ms / 300ms
+    stats_optimization_test.go:47: memory used: 10Mb / 30Mb
+--- PASS: TestGetDomainStat_Time_And_Memory (3.68s)
+=== RUN   TestGetDomainStat_Time_And_Memory
+    stats_optimization_test.go:46: time used: 248.298625ms / 300ms
+    stats_optimization_test.go:47: memory used: 10Mb / 30Mb
+--- PASS: TestGetDomainStat_Time_And_Memory (3.69s)
+PASS
+
+# Go 1.26.4, linux/amd64 emulation, GOMAXPROCS=4, 4 CPU quota
+=== RUN   TestGetDomainStat_Time_And_Memory
+    stats_optimization_test.go:46: time used: 237.52446ms / 300ms
+    stats_optimization_test.go:47: memory used: 10Mb / 30Mb
+--- PASS: TestGetDomainStat_Time_And_Memory (3.64s)
+=== RUN   TestGetDomainStat_Time_And_Memory
+    stats_optimization_test.go:46: time used: 239.16325ms / 300ms
+    stats_optimization_test.go:47: memory used: 10Mb / 30Mb
+--- PASS: TestGetDomainStat_Time_And_Memory (3.63s)
+=== RUN   TestGetDomainStat_Time_And_Memory
+    stats_optimization_test.go:46: time used: 240.987042ms / 300ms
+    stats_optimization_test.go:47: memory used: 10Mb / 30Mb
+--- PASS: TestGetDomainStat_Time_And_Memory (3.61s)
+PASS
