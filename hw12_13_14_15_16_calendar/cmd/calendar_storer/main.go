@@ -14,6 +14,7 @@ import (
 	internalconfig "github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/config"
 	kafkaclient "github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/kafka"
 	"github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/logger"
+	"github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/monitoring"
 	sqlstorage "github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/storage/sql"
 	"github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/storer"
 )
@@ -91,12 +92,15 @@ func run(args []string) error {
 		}
 	}()
 
-	process, err := storer.New(consumer, notificationStorage, logg)
+	metrics := monitoring.NewStorer()
+	process, err := storer.New(consumer, notificationStorage, logg, metrics)
 	if err != nil {
 		return fmt.Errorf("create storer: %w", err)
 	}
-	logg.Info("calendar storer is starting")
-	if err = process.Run(ctx); err != nil {
+	metricsServer := monitoring.NewServer(config.Metrics.Address(), metrics.Handler())
+
+	logg.Info("calendar storer is starting; metrics are available at " + config.Metrics.Address())
+	if err = monitoring.RunWithServer(ctx, process.Run, metricsServer); err != nil {
 		return fmt.Errorf("run storer: %w", err)
 	}
 	return nil

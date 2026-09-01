@@ -32,6 +32,21 @@ type Logger interface {
 	Error(message string)
 }
 
+// Metrics records scheduler health and notification publication results.
+type Metrics interface {
+	SetSchedulerRunning(running bool)
+	ObserveSchedulerCycle(success bool, finishedAt time.Time, duration time.Duration)
+	ObserveNotificationPublished(success bool)
+}
+
+type noopMetrics struct{}
+
+func (noopMetrics) SetSchedulerRunning(bool) {}
+
+func (noopMetrics) ObserveSchedulerCycle(bool, time.Time, time.Duration) {}
+
+func (noopMetrics) ObserveNotificationPublished(bool) {}
+
 // Config contains scheduler execution and retention settings.
 type Config struct {
 	Interval       time.Duration
@@ -59,12 +74,19 @@ type Scheduler struct {
 	producer  Producer
 	logger    Logger
 	config    Config
+	metrics   Metrics
 	now       func() time.Time
 	newTicker func(time.Duration) (<-chan time.Time, func())
 }
 
 // New constructs a scheduler from its dependencies and validated settings.
-func New(storageClient Storage, producer Producer, logger Logger, config Config) (*Scheduler, error) {
+func New(
+	storageClient Storage,
+	producer Producer,
+	logger Logger,
+	config Config,
+	metrics ...Metrics,
+) (*Scheduler, error) {
 	if storageClient == nil {
 		return nil, errors.New("scheduler storage is nil")
 	}
@@ -83,13 +105,30 @@ func New(storageClient Storage, producer Producer, logger Logger, config Config)
 		producer:  producer,
 		logger:    logger,
 		config:    config,
+		metrics:   firstMetrics(metrics),
 		now:       time.Now,
 		newTicker: newTicker,
 	}, nil
 }
 
+func firstMetrics(values []Metrics) Metrics {
+	if len(values) == 0 || values[0] == nil {
+		return noopMetrics{}
+	}
+	return values[0]
+}
+
 // RunOnce performs one cleanup and notification cycle at the supplied time.
-func (s *Scheduler) RunOnce(ctx context.Context, now time.Time) error {
+func (s *Scheduler) RunOnce(ctx context.Context, now time.Time) (err error) {
+	startedAt := time.Now()
+	defer func() {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		finishedAt := time.Now()
+		s.metrics.ObserveSchedulerCycle(err == nil, finishedAt, finishedAt.Sub(startedAt))
+	}()
+
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -131,6 +170,9 @@ func (s *Scheduler) RunOnce(ctx context.Context, now time.Time) error {
 
 // Run performs a cycle immediately and then at every configured interval until cancellation.
 func (s *Scheduler) Run(ctx context.Context) error {
+	s.metrics.SetSchedulerRunning(true)
+	defer s.metrics.SetSchedulerRunning(false)
+
 	s.runAndLog(ctx, s.now())
 
 	ticks, stopTicker := s.newTicker(s.config.Interval)
@@ -163,16 +205,22 @@ func (s *Scheduler) publish(
 		UserID:  event.UserID,
 	}
 	if err := message.Validate(); err != nil {
+		s.metrics.ObserveNotificationPublished(false)
 		return false, fmt.Errorf("build notification for event %q: %w", event.ID, err)
 	}
 
 	payload, err := json.Marshal(message)
 	if err != nil {
+		s.metrics.ObserveNotificationPublished(false)
 		return false, fmt.Errorf("serialize notification for event %q: %w", event.ID, err)
 	}
 	if err = s.producer.Send(ctx, []byte(event.ID), payload); err != nil {
+		if !errors.Is(err, context.Canceled) {
+			s.metrics.ObserveNotificationPublished(false)
+		}
 		return false, fmt.Errorf("send notification for event %q: %w", event.ID, err)
 	}
+	s.metrics.ObserveNotificationPublished(true)
 
 	marked, err := s.storage.MarkNotificationSent(ctx, event, sentAt)
 	if err != nil {

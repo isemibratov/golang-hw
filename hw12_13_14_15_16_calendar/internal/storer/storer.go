@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/notification"
 )
@@ -27,15 +28,31 @@ type Logger interface {
 	Error(message string)
 }
 
+// Metrics records storer health and notification processing results.
+type Metrics interface {
+	SetStorerRunning(running bool)
+	ObserveNotificationStored(success bool, finishedAt time.Time)
+	ObserveInvalidNotification()
+}
+
+type noopMetrics struct{}
+
+func (noopMetrics) SetStorerRunning(bool) {}
+
+func (noopMetrics) ObserveNotificationStored(bool, time.Time) {}
+
+func (noopMetrics) ObserveInvalidNotification() {}
+
 // Storer validates consumed notifications and persists them.
 type Storer struct {
 	consumer Consumer
 	storage  Storage
 	logger   Logger
+	metrics  Metrics
 }
 
 // New creates a notification storer.
-func New(consumer Consumer, storage Storage, logger Logger) (*Storer, error) {
+func New(consumer Consumer, storage Storage, logger Logger, metrics ...Metrics) (*Storer, error) {
 	if consumer == nil {
 		return nil, errors.New("storer consumer is nil")
 	}
@@ -50,23 +67,40 @@ func New(consumer Consumer, storage Storage, logger Logger) (*Storer, error) {
 		consumer: consumer,
 		storage:  storage,
 		logger:   logger,
+		metrics:  firstMetrics(metrics),
 	}, nil
+}
+
+func firstMetrics(values []Metrics) Metrics {
+	if len(values) == 0 || values[0] == nil {
+		return noopMetrics{}
+	}
+	return values[0]
 }
 
 // Run consumes notifications until the consumer stops.
 func (s *Storer) Run(ctx context.Context) error {
+	s.metrics.SetStorerRunning(true)
+	defer s.metrics.SetStorerRunning(false)
+
 	return s.consumer.Consume(ctx, s.handle)
 }
 
 func (s *Storer) handle(ctx context.Context, payload []byte) error {
 	value, valid := s.validNotification(payload)
 	if !valid {
+		s.metrics.ObserveInvalidNotification()
 		// Invalid payloads are non-retryable, so nil tells the consumer to
 		// commit the offset and continue with the next message.
 		return nil
 	}
 
-	return s.storage.SaveNotification(ctx, value)
+	err := s.storage.SaveNotification(ctx, value)
+	if err != nil && errors.Is(err, ctx.Err()) {
+		return err
+	}
+	s.metrics.ObserveNotificationStored(err == nil, time.Now())
+	return err
 }
 
 func (s *Storer) validNotification(payload []byte) (notification.Notification, bool) {

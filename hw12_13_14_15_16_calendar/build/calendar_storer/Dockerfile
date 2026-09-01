@@ -23,5 +23,7 @@ COPY configs/storer.toml /etc/calendar/storer.toml
 
 USER calendar
 
+EXPOSE 8082
+
 ENTRYPOINT ["/usr/local/bin/calendar_storer"]
 CMD ["--config=/etc/calendar/storer.toml"]

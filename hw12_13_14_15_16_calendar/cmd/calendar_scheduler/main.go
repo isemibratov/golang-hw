@@ -14,6 +14,7 @@ import (
 	internalconfig "github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/config"
 	kafkaclient "github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/kafka"
 	"github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/logger"
+	"github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/monitoring"
 	"github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/scheduler"
 	sqlstorage "github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/storage/sql"
 )
@@ -90,17 +91,19 @@ func run(args []string) error {
 		}
 	}()
 
+	metrics := monitoring.NewScheduler()
 	process, err := scheduler.New(eventStorage, producer, logg, scheduler.Config{
 		Interval:       config.Scheduler.Interval.Value(),
 		BatchSize:      config.Scheduler.BatchSize,
 		RetentionYears: config.Scheduler.RetentionYears,
-	})
+	}, metrics)
 	if err != nil {
 		return fmt.Errorf("create scheduler: %w", err)
 	}
+	metricsServer := monitoring.NewServer(config.Metrics.Address(), metrics.Handler())
 
-	logg.Info("calendar scheduler is starting")
-	if err = process.Run(ctx); err != nil {
+	logg.Info("calendar scheduler is starting; metrics are available at " + config.Metrics.Address())
+	if err = monitoring.RunWithServer(ctx, process.Run, metricsServer); err != nil {
 		return fmt.Errorf("run scheduler: %w", err)
 	}
 	return nil

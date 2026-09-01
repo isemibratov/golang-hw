@@ -25,6 +25,8 @@ const (
 	envLoggerLevel             = "CALENDAR_LOGGER_LEVEL"
 	envHTTPHost                = "CALENDAR_HTTP_HOST"
 	envHTTPPort                = "CALENDAR_HTTP_PORT"
+	envMetricsHost             = "CALENDAR_METRICS_HOST"
+	envMetricsPort             = "CALENDAR_METRICS_PORT"
 	envStorageType             = "CALENDAR_STORAGE_TYPE"
 	envStorageDSN              = "CALENDAR_STORAGE_DSN"
 	envKafkaBrokers            = "CALENDAR_KAFKA_BROKERS"
@@ -81,6 +83,17 @@ func (c HTTP) Address() string {
 	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
 }
 
+// Metrics contains the metrics listen settings.
+type Metrics struct {
+	Host string `toml:"host"`
+	Port int    `toml:"port"`
+}
+
+// Address returns the metrics listen address.
+func (c Metrics) Address() string {
+	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
+}
+
 // Storage contains storage selection and connection settings.
 type Storage struct {
 	Type string `toml:"type"`
@@ -116,6 +129,7 @@ type Calendar struct {
 // Scheduler contains the scheduler service configuration.
 type Scheduler struct {
 	Logger    Logger            `toml:"logger"`
+	Metrics   Metrics           `toml:"metrics"`
 	Storage   Storage           `toml:"storage"`
 	Kafka     Kafka             `toml:"kafka"`
 	Scheduler SchedulerSettings `toml:"scheduler"`
@@ -124,6 +138,7 @@ type Scheduler struct {
 // Storer contains the storer service configuration.
 type Storer struct {
 	Logger  Logger  `toml:"logger"`
+	Metrics Metrics `toml:"metrics"`
 	Storage Storage `toml:"storage"`
 	Kafka   Kafka   `toml:"kafka"`
 }
@@ -141,6 +156,7 @@ func NewCalendar() Calendar {
 func NewScheduler() Scheduler {
 	return Scheduler{
 		Logger:  Logger{Level: loggerLevelInfo},
+		Metrics: Metrics{Host: "0.0.0.0", Port: 8081},
 		Storage: Storage{Type: StorageTypeSQL},
 		Kafka:   defaultKafka(),
 		Scheduler: SchedulerSettings{
@@ -155,6 +171,7 @@ func NewScheduler() Scheduler {
 func NewStorer() Storer {
 	config := Storer{
 		Logger:  Logger{Level: loggerLevelInfo},
+		Metrics: Metrics{Host: "0.0.0.0", Port: 8082},
 		Storage: Storage{Type: StorageTypeSQL},
 		Kafka:   defaultKafka(),
 	}
@@ -250,6 +267,9 @@ func applyCalendarEnvironment(config *Calendar, lookup environmentLookup) error 
 
 func applySchedulerEnvironment(config *Scheduler, lookup environmentLookup) error {
 	applyCommonEnvironment(&config.Logger, &config.Storage, lookup)
+	if err := applyMetricsEnvironment(&config.Metrics, lookup); err != nil {
+		return err
+	}
 	if err := applyKafkaEnvironment(&config.Kafka, lookup); err != nil {
 		return err
 	}
@@ -264,6 +284,9 @@ func applySchedulerEnvironment(config *Scheduler, lookup environmentLookup) erro
 
 func applyStorerEnvironment(config *Storer, lookup environmentLookup) error {
 	applyCommonEnvironment(&config.Logger, &config.Storage, lookup)
+	if err := applyMetricsEnvironment(&config.Metrics, lookup); err != nil {
+		return err
+	}
 	return applyKafkaEnvironment(&config.Kafka, lookup)
 }
 
@@ -271,6 +294,11 @@ func applyCommonEnvironment(logger *Logger, storage *Storage, lookup environment
 	overrideString(lookup, envLoggerLevel, &logger.Level)
 	overrideString(lookup, envStorageType, &storage.Type)
 	overrideString(lookup, envStorageDSN, &storage.DSN)
+}
+
+func applyMetricsEnvironment(config *Metrics, lookup environmentLookup) error {
+	overrideString(lookup, envMetricsHost, &config.Host)
+	return overrideInt(lookup, envMetricsPort, &config.Port)
 }
 
 func applyKafkaEnvironment(config *Kafka, lookup environmentLookup) error {
@@ -355,6 +383,9 @@ func (c Scheduler) Validate() error {
 	if err := c.Logger.validate(); err != nil {
 		return err
 	}
+	if err := c.Metrics.validate(); err != nil {
+		return err
+	}
 	if err := c.Storage.validate(false); err != nil {
 		return err
 	}
@@ -378,6 +409,9 @@ func (c Storer) Validate() error {
 	if err := c.Logger.validate(); err != nil {
 		return err
 	}
+	if err := c.Metrics.validate(); err != nil {
+		return err
+	}
 	if err := c.Storage.validate(false); err != nil {
 		return err
 	}
@@ -391,6 +425,16 @@ func (c Logger) validate() error {
 	default:
 		return fmt.Errorf("unsupported logger level %q", c.Level)
 	}
+}
+
+func (c Metrics) validate() error {
+	if strings.TrimSpace(c.Host) == "" {
+		return fmt.Errorf("metrics host is empty")
+	}
+	if c.Port < 1 || c.Port > 65535 {
+		return fmt.Errorf("metrics port must be between 1 and 65535, got %d", c.Port)
+	}
+	return nil
 }
 
 func (c Storage) validate(allowMemory bool) error {

@@ -200,3 +200,130 @@ make lint
 docker compose --file deployments/docker-compose.yaml config --quiet
 make integration-tests
 ```
+
+## ДЗ №16
+
+Все три процесса публикуют метрики в формате Prometheus по пути `/metrics`:
+
+| Процесс | Локальный запуск | Адрес внутри Compose |
+| --- | --- | --- |
+| Calendar API | `http://localhost:8080/metrics` | `http://calendar:8080/metrics` |
+| Scheduler | `http://localhost:8081/metrics` | `http://scheduler:8081/metrics` |
+| Storer | `http://localhost:8082/metrics` | `http://storer:8082/metrics` |
+
+При запуске через Compose API также доступен на
+`http://localhost:8888/metrics`. Порты scheduler и storer наружу не публикуются:
+их опрашивает Prometheus по внутренней сети Compose.
+
+Сервис экспортирует следующие прикладные метрики:
+
+| Метрика | Тип | Labels | Назначение |
+| --- | --- | --- | --- |
+| `calendar_http_requests_total` | counter | `method`, `route`, `status_code` | Число HTTP-запросов, включая ошибочные ответы; позволяет оценивать нагрузку и долю ошибок. |
+| `calendar_http_request_duration_seconds` | histogram | `method`, `route` | Распределение времени обработки HTTP-запросов; используется для расчёта latency percentile. |
+| `calendar_event_operations_total` | counter | `operation`, `result` | Результаты создания, обновления, удаления и чтения событий; показывает состояние ключевых бизнес-сценариев. |
+| `calendar_scheduler_running` | gauge | — | Равен `1`, пока цикл scheduler активен; при штатной остановке сбрасывается в `0`. |
+| `calendar_scheduler_cycles_total` | counter | `result` | Число успешных и ошибочных циклов scheduler. |
+| `calendar_scheduler_cycle_duration_seconds` | histogram | — | Распределение длительности циклов scheduler; помогает выявлять замедление фоновой обработки. |
+| `calendar_scheduler_last_success_timestamp_seconds` | gauge | — | Unix-время последнего успешного цикла scheduler; позволяет обнаруживать зависание или длительные сбои. |
+| `calendar_notifications_published_total` | counter | `result` | Результаты публикации уведомлений в Kafka. |
+| `calendar_storer_running` | gauge | — | Равен `1`, пока consumer storer активен; при штатной остановке сбрасывается в `0`. |
+| `calendar_notifications_processed_total` | counter | `result` | Результаты разбора и сохранения уведомлений storer. |
+| `calendar_storer_last_success_timestamp_seconds` | gauge | — | Unix-время последнего успешно сохранённого уведомления. |
+
+Значение label `route` — шаблон маршрута, например
+`/api/v1/events/{eventId}`, а не фактический URL с идентификатором события.
+Labels не содержат идентификаторы пользователей, событий или произвольные строки:
+нестандартные HTTP-методы нормализуются в `OTHER`. Поэтому число временных рядов
+остаётся ограниченным и предсказуемым. Запросы самого Prometheus к `/metrics`
+не входят в метрики API и не искажают RPS и latency.
+
+Для HTTP-бизнес-операций, циклов scheduler и публикации используются значения
+`result="success|error"`; у storer результат равен `stored`, `error` или
+`invalid`.
+
+Compose запускает закреплённую версию Prometheus с конфигурацией
+`deployments/prometheus/prometheus.yml`. После запуска окружения его интерфейс
+доступен на `http://localhost:9090`; состояние целей сбора можно проверить на
+`http://localhost:9090/targets`. Хостовый порт переопределяется, например,
+командой `CALENDAR_PROMETHEUS_PORT=19090 make up`.
+
+Примеры полезных PromQL-запросов:
+
+```promql
+# Интенсивность запросов к REST API по маршрутам.
+sum by (method, route) (
+  rate(calendar_http_requests_total{route!="/hello"}[5m])
+)
+
+# Доля ответов 5xx среди всех HTTP-запросов.
+sum(rate(calendar_http_requests_total{route!="/hello",status_code=~"5.."}[5m]))
+/
+clamp_min(
+  sum(rate(calendar_http_requests_total{route!="/hello"}[5m])),
+  1e-9
+)
+
+# 95-й процентиль времени ответа по маршрутам.
+histogram_quantile(
+  0.95,
+  sum by (le, route) (
+    rate(calendar_http_request_duration_seconds_bucket{route!="/hello"}[5m])
+  )
+)
+
+# Интенсивность бизнес-операций и их результаты.
+sum by (operation, result) (rate(calendar_event_operations_total[5m]))
+
+# Сколько секунд прошло с последнего успешного цикла scheduler.
+time() - calendar_scheduler_last_success_timestamp_seconds
+
+# Доступность endpoint'ов фоновых процессов с точки зрения Prometheus.
+up{job=~"scheduler|storer"}
+
+# Разница между скоростью публикации и сохранения уведомлений.
+sum(rate(calendar_notifications_published_total{result="success"}[5m]))
+-
+sum(rate(calendar_notifications_processed_total{result="stored"}[5m]))
+```
+
+Последний запрос полезен как ранний признак отставания consumer, но не заменяет
+измерение Kafka consumer lag: повторная доставка допустима, а окна публикации и
+сохранения могут кратковременно не совпадать.
+
+Для контроля доступности процесса следует использовать встроенную метрику
+Prometheus `up`: после остановки endpoint недоступен, поэтому итоговое значение
+`calendar_*_running = 0` обычно не успевает попасть в очередной scrape.
+
+Запуск мониторинга:
+
+```bash
+make up
+curl -fsS http://localhost:8888/metrics
+curl -fsS http://localhost:9090/-/ready
+curl -fsSG --data-urlencode 'query=up{job=~"calendar|scheduler|storer"}' \
+  http://localhost:9090/api/v1/query
+make down
+```
+
+Полная проверка ДЗ16:
+
+```bash
+go mod tidy
+make generate-check
+make build
+make test
+make lint
+docker compose --file deployments/docker-compose.yaml config --quiet
+make integration-tests
+make up
+curl -fsS http://localhost:8888/metrics
+docker compose --project-name calendar --file deployments/docker-compose.yaml \
+  exec -T scheduler wget -qO- http://127.0.0.1:8081/metrics
+docker compose --project-name calendar --file deployments/docker-compose.yaml \
+  exec -T storer wget -qO- http://127.0.0.1:8082/metrics
+curl -fsS http://localhost:9090/-/ready
+curl -fsSG --data-urlencode 'query=up{job=~"calendar|scheduler|storer"}' \
+  http://localhost:9090/api/v1/query
+make down
+```
