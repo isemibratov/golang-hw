@@ -1,0 +1,20 @@
+services:
+  scheduler:
+    environment:
+      CALENDAR_SCHEDULER_INTERVAL: 500ms
+
+  integration-tests:
+    image: calendar-integration-tests:develop
+    build:
+      context: ..
+      dockerfile: build/integration_tests/Dockerfile
+    environment:
+      CALENDAR_HTTP_URL: http://calendar:8080
+      CALENDAR_DATABASE_DSN: postgres://calendar:calendar@postgres:5432/calendar?sslmode=disable
+    depends_on:
+      calendar:
+        condition: service_healthy
+      scheduler:
+        condition: service_started
+      storer:
+        condition: service_started

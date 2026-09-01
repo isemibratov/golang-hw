@@ -1,20 +1,30 @@
+// Package main assembles and runs the calendar service.
 package main
 
-// При желании конфигурацию можно вынести в internal/config.
-// Организация конфига в main принуждает нас сужать API компонентов, использовать
-// при их конструировании только необходимые параметры, а также уменьшает вероятность циклической зависимости.
-type Config struct {
-	Logger LoggerConf
-	// TODO
-}
+import internalconfig "github.com/isemibratov/golang-hw/hw12_13_14_15_16_calendar/internal/config"
 
-type LoggerConf struct {
-	Level string
-	// TODO
-}
+const (
+	storageTypeMemory = internalconfig.StorageTypeMemory
+	storageTypeSQL    = internalconfig.StorageTypeSQL
+)
 
+type (
+	// Config contains settings for the calendar API service.
+	Config = internalconfig.Calendar
+	// LoggerConf contains logging settings.
+	LoggerConf = internalconfig.Logger
+	// HTTPConf contains HTTP server settings.
+	HTTPConf = internalconfig.HTTP
+	// StorageConf contains storage selection and connection settings.
+	StorageConf = internalconfig.Storage
+)
+
+// NewConfig returns a configuration populated with default values.
 func NewConfig() Config {
-	return Config{}
+	return internalconfig.NewCalendar()
 }
 
-// TODO
+// LoadConfig reads, strictly decodes, and validates a TOML configuration file.
+func LoadConfig(path string) (Config, error) {
+	return internalconfig.LoadCalendar(path)
+}

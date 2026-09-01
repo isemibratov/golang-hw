@@ -1,0 +1,16 @@
+[logger]
+level = "info"
+
+[storage]
+type = "sql"
+dsn = "postgres://calendar:calendar@localhost:5432/calendar?sslmode=disable"
+
+[kafka]
+brokers = ["localhost:9092"]
+topic = "calendar.notifications"
+group_id = "calendar-storer"
+connect_timeout = "5s"
+retry_initial = "500ms"
+retry_max = "10s"
+write_timeout = "10s"
+max_message_bytes = 1048576
